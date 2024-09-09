@@ -1,0 +1,128 @@
+import re
+import os
+from datetime import datetime
+from tkinter import Tk, Label, Entry, Button, filedialog, messagebox, StringVar
+from tkinterdnd2 import TkinterDnD, DND_FILES
+
+# デスクトップのパスを取得
+desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+
+def search_and_output_log(input_files, output_file, start_time, end_time):
+    try:
+        # 日時フォーマット
+        time_format = "%Y-%m-%d %H:%M:%S,%f"
+        
+        # 日時の範囲をdatetime型に変換
+        start_dt = datetime.strptime(start_time, time_format)
+        end_dt = datetime.strptime(end_time, time_format)
+
+        with open(output_file, 'w', encoding='utf-8') as outfile:
+            for input_file in input_files:
+                with open(input_file, 'r', encoding='utf-8') as infile:
+                    for line in infile:
+                        # 行から日時を正規表現で抽出
+                        datetime_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})', line)
+                        
+                        if datetime_match:
+                            log_time_str = datetime_match.group(1)
+                            log_time = datetime.strptime(log_time_str, time_format)
+                            
+                            # 指定された範囲内かチェック
+                            if start_dt <= log_time <= end_dt:
+                                # login 部分の抽出 (メールアドレスを含む)
+                                login_match = re.search(r"'login':\s*'([^']+)'", line)
+                                if login_match:
+                                    login_value = login_match.group(1)
+                                    outfile.write(f"ログイン: {login_value}\n")
+                                
+                                # order_id の抽出 (8桁の注文ID)
+                                order_id_match = re.search(r"'order_id':\s*'(\d{8})'", line)
+                                if order_id_match:
+                                    order_id_value = order_id_match.group(1)
+                                    outfile.write(f"注文ID: {order_id_value}\n")
+                                
+                                # 購入成功メッセージの抽出
+                                success_match = re.search(r'\[([^\]]+)\]\s\(INFO\)\s購入成功', line)
+                                if success_match:
+                                    success_time = success_match.group(1)
+                                    outfile.write(f"購入成功日時: {success_time}\n")
+                                    outfile.write("\n")
+        messagebox.showinfo("成功", f"ログファイルの処理が完了しました。出力ファイル: {output_file}")
+
+    except Exception as e:
+        messagebox.showerror("エラー", f"ファイル処理中にエラーが発生しました: {e}")
+
+def browse_files():
+    filenames = filedialog.askopenfilenames(filetypes=[("Text files", "*.txt")])
+    if filenames:
+        input_file_entry.delete(0, 'end')
+        input_file_entry.insert(0, ";".join(filenames))  # ファイルを ; で区切って表示
+
+def handle_dnd(event):
+    files = event.data.split()  # ドラッグ＆ドロップされたファイルパスを取得
+    input_file_entry.delete(0, 'end')
+    input_file_entry.insert(0, ";".join(files))  # ドロップされたファイルを表示
+
+def validate_datetime(P):
+    """
+    日時の形式が 'YYYY-MM-DD HH:MM:SS,mmm' であるかをリアルタイムで検証する
+    """
+    pattern = r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}$"
+    if re.match(pattern, P):
+        return True
+    return False
+
+def start_processing():
+    input_files = input_file_entry.get().split(";")  # ;で分割してリスト化
+    start_time = start_time_entry.get()
+    end_time = end_time_entry.get()
+
+    # 出力ファイルをデスクトップに保存
+    output_file = os.path.join(desktop_path, "output.txt")
+
+    if not input_files:
+        messagebox.showerror("エラー", "ログファイルを選択してください。")
+        return
+    if not start_time or not end_time:
+        messagebox.showerror("エラー", "日時範囲を入力してください。")
+        return
+
+    try:
+        search_and_output_log(input_files, output_file, start_time, end_time)
+    except Exception as e:
+        messagebox.showerror("エラー", f"エラーが発生しました: {e}")
+    
+# GUIアプリのセットアップ
+root = TkinterDnD.Tk()  # TkinterDnD.Tk()を使うことでドラッグ＆ドロップ対応
+root.title("ログファイル検索アプリ")
+
+# GUIウィジェットの設定
+Label(root, text="ログファイル選択 (複数可 / ドラッグ&ドロップ対応):").grid(row=0, column=0, padx=10, pady=10)
+input_file_entry = Entry(root, width=50)
+input_file_entry.grid(row=0, column=1, padx=10, pady=10)
+Button(root, text="参照", command=browse_files).grid(row=0, column=2, padx=10, pady=10)
+
+# ドラッグ＆ドロップされたファイルの処理
+input_file_entry.drop_target_register(DND_FILES)
+input_file_entry.dnd_bind('<<Drop>>', handle_dnd)
+
+# 日時入力欄にバリデーションを追加
+vcmd = (root.register(validate_datetime), '%P')
+
+# デフォルトの日付
+default_datetime = "2024-01-01 00:00:00,000"
+
+Label(root, text="開始日時 (YYYY-MM-DD HH:MM:SS,mmm):").grid(row=1, column=0, padx=10, pady=10)
+start_time_entry = Entry(root, width=40, validate="key", validatecommand=vcmd)
+start_time_entry.insert(0, default_datetime)  # デフォルトの日付を入力
+start_time_entry.grid(row=1, column=1, padx=10, pady=10)
+
+Label(root, text="終了日時 (YYYY-MM-DD HH:MM:SS,mmm):").grid(row=2, column=0, padx=10, pady=10)
+end_time_entry = Entry(root, width=40, validate="key", validatecommand=vcmd)
+end_time_entry.insert(0, default_datetime)  # デフォルトの日付を入力
+end_time_entry.grid(row=2, column=1, padx=10, pady=10)
+
+Button(root, text="処理開始", command=start_processing).grid(row=3, column=1, padx=10, pady=20)
+
+# アプリケーションを実行
+root.mainloop()
